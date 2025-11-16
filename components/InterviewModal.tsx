@@ -361,7 +361,7 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
                     <div className="space-y-2">
                       {answerBlock.quotes.map((verbatimQuote, quoteIdx) => (
                         <div key={quoteIdx} className="bg-muted p-3 rounded space-y-1">
-                          <p className="text-sm italic text-muted-foreground">"{verbatimQuote.quote}"</p>
+                          <p className="text-sm italic text-muted-foreground">&quot;{verbatimQuote.quote}&quot;</p>
                           {verbatimQuote.note && (
                             <p className="text-xs text-muted-foreground/80">Note: {verbatimQuote.note}</p>
                           )}

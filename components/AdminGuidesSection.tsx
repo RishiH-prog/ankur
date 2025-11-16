@@ -58,6 +58,7 @@ export function AdminGuidesSection() {
 
   useEffect(() => {
     loadGuidesFromAzure();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadGuidesFromAzure = async () => {

@@ -40,6 +40,7 @@ export function AnalysisVersionControl({ audioId, questionnaireId }: AnalysisVer
 
   useEffect(() => {
     loadVersions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioId, questionnaireId]);
 
   const loadVersions = async () => {
@@ -199,7 +200,7 @@ export function AnalysisVersionControl({ audioId, questionnaireId }: AnalysisVer
                                   <ul className="list-disc list-inside mt-1 space-y-1">
                                     {q.verbatimQuotes.map((quote: any, qIdx: number) => (
                                       <li key={qIdx} className="text-xs italic">
-                                        "{quote.quote}"
+                                        &quot;{quote.quote}&quot;
                                         {quote.note && <span className="text-muted-foreground"> - {quote.note}</span>}
                                       </li>
                                     ))}
