@@ -61,8 +61,8 @@ export function AnalysisVersionControl({ audioId, questionnaireId }: AnalysisVer
           return {
             version: a.version,
             blobName: a.blobName,
-            size: a.size,
-            lastModified: a.lastModified,
+            size: a.size || 0,
+            lastModified: a.lastModified || new Date().toISOString(),
             model,
           };
         })
