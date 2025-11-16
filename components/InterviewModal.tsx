@@ -83,7 +83,7 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
             return {
               version: a.version,
               model,
-              lastModified: a.lastModified,
+              lastModified: a.lastModified || new Date().toISOString(),
             };
           })
         );
@@ -229,7 +229,7 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
             return {
               version: a.version,
               model,
-              lastModified: a.lastModified,
+              lastModified: a.lastModified || new Date().toISOString(),
             };
           })
         );
