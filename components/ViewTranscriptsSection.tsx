@@ -15,9 +15,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { listRecords, getTranscript, getTranslation, deleteRecord } from "@/lib/azure";
-import type { AzureRecord } from "@/lib/types";
-import { Loader2, RefreshCw, FileText, Languages, Trash2 } from "lucide-react";
+import { listRecords, getTranscript, getTranslation, deleteRecord, updateRecordMetadata } from "@/lib/azure";
+import type { AzureRecord, AzureUploadMeta } from "@/lib/types";
+import { Loader2, RefreshCw, FileText, Languages, Trash2, Edit } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/format";
 import {
   Dialog,
@@ -42,6 +43,9 @@ export function ViewTranscriptsSection({
   const [hindiTranscript, setHindiTranscript] = useState<string | null>(null);
   const [englishTranscript, setEnglishTranscript] = useState<string | null>(null);
   const [loadingTranscripts, setLoadingTranscripts] = useState(false);
+  const [showEditMetadata, setShowEditMetadata] = useState(false);
+  const [editingMeta, setEditingMeta] = useState<Partial<AzureUploadMeta>>({});
+  const [savingMetadata, setSavingMetadata] = useState(false);
 
   const loadRecords = async () => {
     setLoading(true);
@@ -130,6 +134,34 @@ export function ViewTranscriptsSection({
     setSelectedRecord(null);
     setHindiTranscript(null);
     setEnglishTranscript(null);
+    setShowEditMetadata(false);
+    setEditingMeta({});
+  };
+
+  const handleOpenEditMetadata = (record: AzureRecord) => {
+    setEditingMeta({ ...record.meta });
+    setShowEditMetadata(true);
+  };
+
+  const handleSaveMetadata = async () => {
+    if (!selectedRecord) return;
+
+    setSavingMetadata(true);
+    try {
+      const updated = await updateRecordMetadata(selectedRecord.audioId, editingMeta, false);
+      
+      // Update the selected record and the records list
+      setSelectedRecord(updated);
+      setRecords(records.map(r => r.audioId === updated.audioId ? updated : r));
+      
+      toast.success("Metadata updated successfully");
+      setShowEditMetadata(false);
+    } catch (error) {
+      console.error("Error updating metadata:", error);
+      toast.error(`Failed to update metadata: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setSavingMetadata(false);
+    }
   };
 
   const handleDeleteAudio = async (audioId: string) => {
@@ -260,10 +292,22 @@ export function ViewTranscriptsSection({
           {selectedRecord && (
             <>
               <DialogHeader>
-                <DialogTitle>Audio Details & Transcripts</DialogTitle>
-                <DialogDescription>
-                  Audio ID: {selectedRecord.audioId}
-                </DialogDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <DialogTitle>Audio Details & Transcripts</DialogTitle>
+                    <DialogDescription>
+                      Audio ID: {selectedRecord.audioId}
+                    </DialogDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenEditMetadata(selectedRecord)}
+                  >
+                    <Edit className="h-4 w-4 mr-2" />
+                    Edit Metadata
+                  </Button>
+                </div>
               </DialogHeader>
 
               <div className="space-y-6">
@@ -379,6 +423,122 @@ export function ViewTranscriptsSection({
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Metadata Dialog */}
+      <Dialog open={showEditMetadata} onOpenChange={setShowEditMetadata}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Metadata</DialogTitle>
+            <DialogDescription>
+              Update metadata for audio ID: {selectedRecord?.audioId}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="farmerName">Farmer Name *</Label>
+                <Input
+                  id="farmerName"
+                  value={editingMeta.farmerName || ""}
+                  onChange={(e) => setEditingMeta({ ...editingMeta, farmerName: e.target.value })}
+                  placeholder="Enter farmer name"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="village">Village / District *</Label>
+                <Input
+                  id="village"
+                  value={editingMeta.village || ""}
+                  onChange={(e) => setEditingMeta({ ...editingMeta, village: e.target.value })}
+                  placeholder="Enter village or district"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="interviewer">Interviewer</Label>
+                <Input
+                  id="interviewer"
+                  value={editingMeta.interviewer || ""}
+                  onChange={(e) => setEditingMeta({ ...editingMeta, interviewer: e.target.value })}
+                  placeholder="Enter interviewer name"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="interviewDate">Interview Date</Label>
+                <Input
+                  id="interviewDate"
+                  type="date"
+                  value={editingMeta.interviewDate || ""}
+                  onChange={(e) => setEditingMeta({ ...editingMeta, interviewDate: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="surveyId">Survey ID</Label>
+                <Input
+                  id="surveyId"
+                  value={editingMeta.surveyId || ""}
+                  onChange={(e) => setEditingMeta({ ...editingMeta, surveyId: e.target.value })}
+                  placeholder="Enter survey ID"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="tags">Tags (comma-separated)</Label>
+                <Input
+                  id="tags"
+                  value={editingMeta.tags?.join(", ") || ""}
+                  onChange={(e) => {
+                    const tags = e.target.value
+                      .split(",")
+                      .map(t => t.trim())
+                      .filter(Boolean);
+                    setEditingMeta({ ...editingMeta, tags: tags.length > 0 ? tags : undefined });
+                  }}
+                  placeholder="tag1, tag2, tag3"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea
+                id="notes"
+                value={editingMeta.notes || ""}
+                onChange={(e) => setEditingMeta({ ...editingMeta, notes: e.target.value })}
+                placeholder="Enter any additional notes"
+                className="min-h-[100px]"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowEditMetadata(false)}
+              disabled={savingMetadata}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveMetadata}
+              disabled={savingMetadata || !editingMeta.farmerName || !editingMeta.village}
+            >
+              {savingMetadata ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save Changes"
+              )}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

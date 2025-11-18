@@ -589,6 +589,53 @@ export async function deleteRecord(audioId: string): Promise<{
 }
 
 /**
+ * Updates the metadata of an existing audio record
+ * @param audioId The audio ID
+ * @param meta Metadata fields to update
+ * @param overwrite If true, replaces entire meta object; if false, merges with existing (default: false)
+ * @returns Updated record
+ */
+export async function updateRecordMetadata(
+  audioId: string,
+  meta: Partial<AzureUploadMeta>,
+  overwrite: boolean = false
+): Promise<AzureRecord> {
+  if (!BASE_URL) {
+    throw new Error(
+      "Azure base URL is not configured. Please set NEXT_PUBLIC_AZURE_BASE_URL in your .env.local file."
+    );
+  }
+
+  try {
+    const response = await fetch(`${BASE_URL}/api/records/${audioId}/metadata`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        meta,
+        overwrite,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      throw new Error(`Failed to update record metadata (${response.status}): ${errorText}`);
+    }
+
+    const updatedRecord: AzureRecord = await response.json();
+    return updatedRecord;
+  } catch (error) {
+    if (error instanceof TypeError && error.message === "Failed to fetch") {
+      throw new Error(
+        `CORS error: The Azure Function does not allow requests from this origin. Please configure CORS on the Azure Function.`
+      );
+    }
+    throw error;
+  }
+}
+
+/**
  * Polls for transcript and translation to be ready
  * @param audioId The audio ID
  * @param onProgress Optional callback for progress updates
