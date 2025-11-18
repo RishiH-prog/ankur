@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner";
 import { listRecords, getTranscript, getTranslation, deleteRecord, updateRecordMetadata } from "@/lib/azure";
 import type { AzureRecord, AzureUploadMeta } from "@/lib/types";
-import { Loader2, RefreshCw, FileText, Languages, Trash2, Edit } from "lucide-react";
+import { Loader2, RefreshCw, FileText, Languages, Trash2, Edit, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/format";
 import {
@@ -46,6 +46,7 @@ export function ViewTranscriptsSection({
   const [showEditMetadata, setShowEditMetadata] = useState(false);
   const [editingMeta, setEditingMeta] = useState<Partial<AzureUploadMeta>>({});
   const [savingMetadata, setSavingMetadata] = useState(false);
+  const [tagInput, setTagInput] = useState("");
 
   const loadRecords = async () => {
     setLoading(true);
@@ -139,8 +140,39 @@ export function ViewTranscriptsSection({
   };
 
   const handleOpenEditMetadata = (record: AzureRecord) => {
-    setEditingMeta({ ...record.meta });
+    setEditingMeta({ 
+      ...record.meta,
+      tags: record.meta.tags || []
+    });
+    setTagInput("");
     setShowEditMetadata(true);
+  };
+
+  const handleAddTag = (e?: React.MouseEvent | React.KeyboardEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const trimmedTag = tagInput.trim();
+    const currentTags = editingMeta.tags || [];
+    if (trimmedTag && !currentTags.includes(trimmedTag)) {
+      setEditingMeta({ ...editingMeta, tags: [...currentTags, trimmedTag] });
+      setTagInput("");
+    }
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    const currentTags = editingMeta.tags || [];
+    const newTags = currentTags.filter((tag) => tag !== tagToRemove);
+    setEditingMeta({ ...editingMeta, tags: newTags.length > 0 ? newTags : [] });
+  };
+
+  const handleTagInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      handleAddTag(e);
+    }
   };
 
   const handleSaveMetadata = async () => {
@@ -148,7 +180,16 @@ export function ViewTranscriptsSection({
 
     setSavingMetadata(true);
     try {
-      const updated = await updateRecordMetadata(selectedRecord.audioId, editingMeta, false);
+      // Ensure tags is an empty array if no tags, not undefined
+      const tagsToSave = editingMeta.tags && editingMeta.tags.length > 0 ? editingMeta.tags : [];
+      const metaToSave = {
+        ...editingMeta,
+        tags: tagsToSave,
+      };
+      
+      // If we're clearing tags (had tags before, now empty), we might need to ensure it's saved
+      // Use overwrite: false for normal merge, but ensure tags array is explicitly set
+      const updated = await updateRecordMetadata(selectedRecord.audioId, metaToSave, false);
       
       // Update the selected record and the records list
       setSelectedRecord(updated);
@@ -156,6 +197,7 @@ export function ViewTranscriptsSection({
       
       toast.success("Metadata updated successfully");
       setShowEditMetadata(false);
+      setTagInput("");
     } catch (error) {
       console.error("Error updating metadata:", error);
       toast.error(`Failed to update metadata: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -489,19 +531,46 @@ export function ViewTranscriptsSection({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="tags">Tags (comma-separated)</Label>
-                <Input
-                  id="tags"
-                  value={editingMeta.tags?.join(", ") || ""}
-                  onChange={(e) => {
-                    const tags = e.target.value
-                      .split(",")
-                      .map(t => t.trim())
-                      .filter(Boolean);
-                    setEditingMeta({ ...editingMeta, tags: tags.length > 0 ? tags : undefined });
-                  }}
-                  placeholder="tag1, tag2, tag3"
-                />
+                <Label htmlFor="tags">Tags</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="tags"
+                    placeholder="Enter a tag and press Enter"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={handleTagInputKeyDown}
+                    disabled={savingMetadata}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={(e) => handleAddTag(e)}
+                    disabled={savingMetadata || !tagInput.trim()}
+                  >
+                    Add Tag
+                  </Button>
+                </div>
+                {editingMeta.tags && editingMeta.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {editingMeta.tags.map((tag) => (
+                      <Badge
+                        key={tag}
+                        variant="secondary"
+                        className="flex items-center gap-1"
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTag(tag)}
+                          className="ml-1 hover:text-destructive"
+                          disabled={savingMetadata}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -520,7 +589,10 @@ export function ViewTranscriptsSection({
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
-              onClick={() => setShowEditMetadata(false)}
+              onClick={() => {
+                setShowEditMetadata(false);
+                setTagInput("");
+              }}
               disabled={savingMetadata}
             >
               Cancel
