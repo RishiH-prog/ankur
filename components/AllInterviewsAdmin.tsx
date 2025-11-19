@@ -127,16 +127,17 @@ export function AllInterviewsAdmin({
     return filtered;
   }, [interviews, filters, sortField, sortOrder]);
 
-  const handleDownload = (interview: Interview) => {
+  const handleDownload = async (interview: Interview) => {
     try {
-      downloadSingleInterview(interview);
+      await downloadSingleInterview(interview, guides);
       toast.success(TOAST_MESSAGES.INTERVIEW_DOWNLOADED);
     } catch (error) {
       console.error("Error downloading interview:", error);
+      toast.error("Failed to download interview");
     }
   };
 
-  const handleBulkDownload = () => {
+  const handleBulkDownload = async () => {
     if (filteredAndSorted.length === 0) {
       toast.error(TOAST_MESSAGES.NO_INTERVIEWS_TO_DOWNLOAD);
       return;
@@ -146,10 +147,12 @@ export function AllInterviewsAdmin({
         .filter(([_, value]) => value && value !== "all")
         .map(([key, value]) => `${key}: ${value}`)
         .join(", ") || "None";
-      downloadBulkInterviews(filteredAndSorted, filterInfo);
+      toast.info(`Downloading ${filteredAndSorted.length} interview(s)...`);
+      await downloadBulkInterviews(filteredAndSorted, filterInfo, guides);
       toast.success(TOAST_MESSAGES.DOWNLOADED_INTERVIEWS(filteredAndSorted.length));
     } catch (error) {
       console.error("Error downloading interviews:", error);
+      toast.error("Failed to download interviews");
     }
   };
 
@@ -283,8 +286,6 @@ export function AllInterviewsAdmin({
           </div>
         </div>
 
-        {/* Sort, count, download controls remain */}
-
         <div className="rounded-md border">
           <Table>
             <TableHeader>
@@ -336,6 +337,16 @@ export function AllInterviewsAdmin({
             </TableBody>
           </Table>
         </div>
+
+        {/* Download All Button */}
+        {filteredAndSorted.length > 0 && (
+          <div className="flex justify-end pt-4 border-t">
+            <Button onClick={handleBulkDownload} variant="default">
+              <Download className="h-4 w-4 mr-2" />
+              Download All ({filteredAndSorted.length} interview{filteredAndSorted.length !== 1 ? "s" : ""})
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
