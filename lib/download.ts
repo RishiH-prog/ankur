@@ -33,7 +33,7 @@ async function ensureInterviewAnswers(interview: Interview, guides: Array<{ id: 
           .split(/\r?\n/)
           .map((l) => l.trim())
           .filter(Boolean);
-        guide = { id: interview.guideId, questions, name: interview.guideName };
+        guide = { id: interview.guideId, questions };
       } catch (e) {
         console.warn("Failed to fetch questionnaire for download:", e);
         return [];
