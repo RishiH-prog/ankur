@@ -508,7 +508,7 @@ export function AdminGuidesSection() {
           <Input id="guide-file" type="file" accept=".json,.txt" onChange={handleFileUpload} disabled={isUploading} />
           {isUploading && <p className="text-sm text-muted-foreground">Uploading to Azure...</p>}
           <p className="text-xs text-muted-foreground">
-            JSON format: {"{"} "questions": [], "prompts": [] {"}"}
+            JSON format: {"{"} &quot;questions&quot;: [], &quot;prompts&quot;: [] {"}"}
           </p>
         </div>
 
