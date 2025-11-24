@@ -585,7 +585,7 @@ export function AdminGuidesSection() {
     setIsUploading(true);
 
     try {
-      // Read file content
+      // Read file content as raw text (preserve original format)
       const fileContent = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve(e.target?.result as string);
@@ -593,25 +593,62 @@ export function AdminGuidesSection() {
         reader.readAsText(selectedFile);
       });
 
-      // Parse JSON or text
-      let jsonData: { questions?: string[]; prompts?: string[] };
+      // Validate that it's JSON (but don't parse/reformat it)
+      let isValidJson = false;
       try {
-        jsonData = JSON.parse(fileContent);
+        const parsed = JSON.parse(fileContent);
+        // Validate structure exists
+        if (parsed && (Array.isArray(parsed.questions) || Array.isArray(parsed.prompts))) {
+          isValidJson = true;
+        }
       } catch {
-        // Not JSON, treat as plain text with questions
+        // Not valid JSON, check if it's plain text
         const lines = fileContent.split("\n").map(l => l.trim()).filter(Boolean);
-        jsonData = { questions: lines };
+        if (lines.length > 0) {
+          // Treat as plain text - convert to JSON format
+          const jsonData = { questions: lines };
+          const jsonBlob = new Blob([JSON.stringify(jsonData, null, 2)], { type: "application/json" });
+          const jsonFile = new File([jsonBlob], selectedFile.name.replace(/\.[^/.]+$/, "") + ".json", { type: "application/json" });
+          
+          const meta: Record<string, any> = {
+            guideName: guideName || selectedFile.name.replace(/\.[^/.]+$/, ""),
+          };
+          if (tags.length > 0) meta.tags = tags;
+
+          const { uploadUrl } = await createQuestionnaireUploadUrl(
+            jsonFile.name,
+            jsonFile.size,
+            "application/json",
+            meta
+          );
+          await uploadToSAS(uploadUrl, jsonFile);
+
+          toast.success(TOAST_MESSAGES.GUIDE_UPLOADED(meta.guideName));
+          setGuideName("");
+          setTags([]);
+          setTagInput("");
+          setFile(null);
+          const inp = document.getElementById("guide-file") as HTMLInputElement | null;
+          if (inp) inp.value = "";
+          await new Promise((r) => setTimeout(r, 500));
+          await loadGuidesFromAzure();
+          setIsUploading(false);
+          return;
+        } else {
+          toast.error("File must contain 'questions' or 'prompts' array, or valid questions text");
+          setIsUploading(false);
+          return;
+        }
       }
 
-      // Validate structure
-      if (!jsonData.questions && !jsonData.prompts) {
+      if (!isValidJson) {
         toast.error("File must contain 'questions' or 'prompts' array");
         setIsUploading(false);
         return;
       }
 
-      // Create JSON blob for upload
-      const jsonBlob = new Blob([JSON.stringify(jsonData)], { type: "application/json" });
+      // Upload the raw file content as-is (preserve original formatting)
+      const jsonBlob = new Blob([fileContent], { type: "application/json" });
       const jsonFile = new File([jsonBlob], selectedFile.name.replace(/\.[^/.]+$/, "") + ".json", { type: "application/json" });
 
       const meta: Record<string, any> = {
