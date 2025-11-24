@@ -585,86 +585,110 @@ export function AdminGuidesSection() {
     setIsUploading(true);
 
     try {
-      // Read file content as raw text (preserve original format)
-      const fileContent = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target?.result as string);
-        reader.onerror = reject;
-        reader.readAsText(selectedFile);
-      });
+      // For .json files, validate but upload the original file directly without reading/recreating
+      const isJsonFile = selectedFile.name.toLowerCase().endsWith('.json');
+      
+      if (isJsonFile) {
+        // Read only to validate, but upload the original file
+        const fileContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsText(selectedFile);
+        });
 
-      // Validate that it's JSON (but don't parse/reformat it)
-      let isValidJson = false;
-      try {
-        const parsed = JSON.parse(fileContent);
-        // Validate structure exists
-        if (parsed && (Array.isArray(parsed.questions) || Array.isArray(parsed.prompts))) {
-          isValidJson = true;
-        }
-      } catch {
-        // Not valid JSON, check if it's plain text
-        const lines = fileContent.split("\n").map(l => l.trim()).filter(Boolean);
-        if (lines.length > 0) {
-          // Treat as plain text - convert to JSON format
-          const jsonData = { questions: lines };
-          const jsonBlob = new Blob([JSON.stringify(jsonData, null, 2)], { type: "application/json" });
-          const jsonFile = new File([jsonBlob], selectedFile.name.replace(/\.[^/.]+$/, "") + ".json", { type: "application/json" });
-          
-          const meta: Record<string, any> = {
-            guideName: guideName || selectedFile.name.replace(/\.[^/.]+$/, ""),
-          };
-          if (tags.length > 0) meta.tags = tags;
-
-          const { uploadUrl } = await createQuestionnaireUploadUrl(
-            jsonFile.name,
-            jsonFile.size,
-            "application/json",
-            meta
-          );
-          await uploadToSAS(uploadUrl, jsonFile);
-
-          toast.success(TOAST_MESSAGES.GUIDE_UPLOADED(meta.guideName));
-          setGuideName("");
-          setTags([]);
-          setTagInput("");
-          setFile(null);
-          const inp = document.getElementById("guide-file") as HTMLInputElement | null;
-          if (inp) inp.value = "";
-          await new Promise((r) => setTimeout(r, 500));
-          await loadGuidesFromAzure();
+        // Quick validation that it's valid JSON with required structure
+        // First, try to fix common JSON issues like trailing commas
+        let cleanedContent = fileContent;
+        
+        // Remove trailing commas before closing brackets/braces (common JSON mistake)
+        // Match: comma followed by whitespace and closing bracket/brace
+        cleanedContent = cleanedContent.replace(/,(\s*[\]\}])/g, '$1');
+        
+        try {
+          const parsed = JSON.parse(cleanedContent);
+          if (!parsed || (!Array.isArray(parsed.questions) && !Array.isArray(parsed.prompts))) {
+            toast.error("File must contain 'questions' or 'prompts' array");
+            setIsUploading(false);
+            return;
+          }
+        } catch (parseError) {
+          // Provide helpful error message about JSON syntax
+          const errorMsg = parseError instanceof Error ? parseError.message : "Unknown error";
+          if (errorMsg.includes("trailing") || errorMsg.includes("comma")) {
+            toast.error("Invalid JSON: Trailing commas are not allowed. Please remove any trailing commas in arrays or objects.");
+          } else if (errorMsg.includes("Unexpected token")) {
+            toast.error(`Invalid JSON syntax: ${errorMsg}. Please check your JSON formatting.`);
+          } else {
+            toast.error(`Invalid JSON: ${errorMsg}. File must be valid JSON with 'questions' or 'prompts' array.`);
+          }
           setIsUploading(false);
           return;
+        }
+
+        // If we cleaned the content (removed trailing commas), upload the cleaned version
+        // Otherwise upload the original file
+        let fileToUpload: File;
+        if (cleanedContent !== fileContent) {
+          // Create a new file with cleaned content (preserves formatting, just fixes trailing commas)
+          const cleanedBlob = new Blob([cleanedContent], { type: "application/json" });
+          fileToUpload = new File([cleanedBlob], selectedFile.name, { type: "application/json" });
         } else {
-          toast.error("File must contain 'questions' or 'prompts' array, or valid questions text");
+          // Upload original file if no cleaning was needed
+          fileToUpload = selectedFile;
+        }
+
+        const meta: Record<string, any> = {
+          guideName: guideName || selectedFile.name.replace(/\.[^/.]+$/, ""),
+        };
+        if (tags.length > 0) meta.tags = tags;
+
+        const { uploadUrl } = await createQuestionnaireUploadUrl(
+          fileToUpload.name,
+          fileToUpload.size,
+          fileToUpload.type || "application/json",
+          meta
+        );
+        await uploadToSAS(uploadUrl, fileToUpload);
+      } else {
+        // For non-JSON files, read and convert to JSON format (plain text handling)
+        const fileContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsText(selectedFile);
+        });
+
+        const lines = fileContent.split("\n").map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) {
+          toast.error("File must contain questions or prompts");
           setIsUploading(false);
           return;
         }
+
+        // Convert plain text to JSON format
+        const jsonData = { questions: lines };
+        const jsonBlob = new Blob([JSON.stringify(jsonData, null, 2)], { type: "application/json" });
+        const jsonFile = new File([jsonBlob], selectedFile.name.replace(/\.[^/.]+$/, "") + ".json", { type: "application/json" });
+        
+        const meta: Record<string, any> = {
+          guideName: guideName || selectedFile.name.replace(/\.[^/.]+$/, ""),
+        };
+        if (tags.length > 0) meta.tags = tags;
+
+        const { uploadUrl } = await createQuestionnaireUploadUrl(
+          jsonFile.name,
+          jsonFile.size,
+          "application/json",
+          meta
+        );
+        await uploadToSAS(uploadUrl, jsonFile);
       }
 
-      if (!isValidJson) {
-        toast.error("File must contain 'questions' or 'prompts' array");
-        setIsUploading(false);
-        return;
-      }
+      // Get meta for success message
+      const fileName = guideName || selectedFile.name.replace(/\.[^/.]+$/, "");
 
-      // Upload the raw file content as-is (preserve original formatting)
-      const jsonBlob = new Blob([fileContent], { type: "application/json" });
-      const jsonFile = new File([jsonBlob], selectedFile.name.replace(/\.[^/.]+$/, "") + ".json", { type: "application/json" });
-
-      const meta: Record<string, any> = {
-        guideName: guideName || selectedFile.name.replace(/\.[^/.]+$/, ""),
-      };
-      if (tags.length > 0) meta.tags = tags;
-
-      const { uploadUrl } = await createQuestionnaireUploadUrl(
-        jsonFile.name,
-        jsonFile.size,
-        "application/json",
-        meta
-      );
-      await uploadToSAS(uploadUrl, jsonFile);
-
-      toast.success(TOAST_MESSAGES.GUIDE_UPLOADED(meta.guideName));
+      toast.success(TOAST_MESSAGES.GUIDE_UPLOADED(fileName));
 
       setGuideName("");
       setTags([]);
@@ -795,10 +819,39 @@ export function AdminGuidesSection() {
       console.debug("Raw questionnaire data:", data);
       const parsed = parseQuestionnaireData(data);
       console.debug("Parsed questionnaire data:", parsed);
+      
+      // Try to get original raw text - reconstruct from corrupted format if needed
+      let rawText = data?.text || "";
+      
+      // If the text field contains corrupted format, reconstruct the original JSON
+      if (rawText && typeof rawText === "string") {
+        const trimmed = rawText.trim();
+        if (trimmed.startsWith("{") && trimmed.includes('"questions"')) {
+          try {
+            const textObj = JSON.parse(trimmed);
+            // Check if it's the corrupted format (has questions array with JSON structure elements)
+            if (Array.isArray(textObj.questions) && textObj.questions.length > 0) {
+              const firstItem = String(textObj.questions[0] || "").trim();
+              if (firstItem === "{" || firstItem.includes('"questions"')) {
+                // This is corrupted - reconstruct original JSON by joining lines
+                const lines = textObj.questions.map((item: any) => {
+                  const line = String(item);
+                  // If line is a stringified JSON string, unescape it
+                  return line;
+                });
+                rawText = lines.join("\n");
+              }
+            }
+          } catch {
+            // Not JSON or parsing failed, use as-is
+          }
+        }
+      }
+      
       setSelectedQuestionnaireData({
         questions: parsed.questions,
         prompts: parsed.prompts,
-        text: data?.text || "",
+        text: rawText,
       });
     } catch (error) {
       toast.error("Failed to load questionnaire");
@@ -1188,8 +1241,8 @@ export function AdminGuidesSection() {
 
                 {selectedQuestionnaireData.text && (
                   <div className="space-y-2">
-                    <Label className="font-semibold">Raw Text</Label>
-                    <Textarea readOnly value={selectedQuestionnaireData.text} className="min-h-[200px] bg-muted font-mono text-sm" />
+                    <Label className="font-semibold">Raw Text (Original File Content)</Label>
+                    <Textarea readOnly value={selectedQuestionnaireData.text} className="min-h-[200px] bg-muted font-mono text-sm whitespace-pre" />
                   </div>
                 )}
               </div>
