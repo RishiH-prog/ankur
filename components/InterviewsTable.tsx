@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/table";
 import { useInterviewsStore } from "@/store/interviews";
 import type { Interview } from "@/lib/types";
-import { Pencil } from "lucide-react";
+import { Pencil, RefreshCw, Loader2 } from "lucide-react";
 
 interface InterviewsTableProps {
   onEdit: (interview: Interview) => void;
@@ -42,6 +42,7 @@ function getStatusBadgeClassName(status: Interview["status"]): string {
 export function InterviewsTable({ onEdit }: InterviewsTableProps) {
   const { interviews, loadInterviews } = useInterviewsStore();
   const [localInterviews, setLocalInterviews] = useState<Interview[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     loadInterviews();
@@ -59,11 +60,34 @@ export function InterviewsTable({ onEdit }: InterviewsTableProps) {
     return () => clearInterval(id);
   }, [loadInterviews]);
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await loadInterviews();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Edit Questionnaire</CardTitle>
-        <CardDescription>View and edit questionnaire answers</CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Edit Questionnaire</CardTitle>
+            <CardDescription>View and edit questionnaire answers</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
+            {isRefreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </>
+            )}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {localInterviews.length === 0 ? (

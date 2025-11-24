@@ -2,6 +2,7 @@ export type Guide = {
   id: string;
   name: string;
   questions: string[];
+  prompts?: string[]; // Optional prompts/outline items
   questionnaireId?: string; // Azure questionnaire ID
 };
 

@@ -178,12 +178,48 @@ export function AllInterviewsAdmin({
       .filter((opt) => opt.value !== undefined);
   }, [uniqueVillages]);
 
+  const handleDeleteAnalysisOnly = async (interview: Interview) => {
+    if (!interview.audioId || !interview.guideId) {
+      toast.error("Cannot delete analysis: missing audio or guide ID");
+      return;
+    }
+
+    const ok = confirm(`Delete analysis only (keep audio file) for ${interview.farmerName}?`);
+    if (!ok) return;
+
+    try {
+      // Only delete the analysis, NOT the audio
+      await deleteAnalysis(interview.audioId, interview.guideId, { allVersions: true });
+      
+      // Remove interview from local store since it no longer has analysis
+      deleteInterview(interview.id);
+      
+      await loadInterviews();
+      toast.success("Analysis deleted (audio file preserved)");
+    } catch (e) {
+      console.error("Delete analysis error:", e);
+      toast.error("Failed to delete analysis");
+    }
+  };
+
   const handleDeleteInterview = async (interview: Interview) => {
     try {
-      const ok = confirm(`Delete interview for ${interview.farmerName}? This removes Azure artifacts for this item.`);
+      const ok = confirm(`Delete ENTIRE INTERVIEW (including audio file and all analyses) for ${interview.farmerName}? This action cannot be undone.`);
       if (!ok) return;
 
-      // Attempt to delete audio record if available
+      // Delete interview from local store first
+      deleteInterview(interview.id);
+      
+      // Attempt to delete all analysis versions for this pair (but NOT the audio)
+      if (interview.audioId && interview.guideId) {
+        try {
+          await deleteAnalysis(interview.audioId, interview.guideId, { allVersions: true });
+        } catch (e) {
+          console.warn("deleteAnalysis warning:", e);
+        }
+      }
+
+      // Attempt to delete audio record if available (this deletes the audio file)
       if (interview.audioId) {
         try {
           await deleteRecord(interview.audioId);
@@ -193,18 +229,8 @@ export function AllInterviewsAdmin({
         }
       }
 
-      // Attempt to delete all analysis versions for this pair
-      if (interview.audioId && interview.guideId) {
-        try {
-          await deleteAnalysis(interview.audioId, interview.guideId, { allVersions: true });
-        } catch (e) {
-          console.warn("deleteAnalysis warning:", e);
-        }
-      }
-
-      deleteInterview(interview.id);
       await loadInterviews();
-      toast.success("Interview deleted");
+      toast.success("Interview and audio file deleted");
     } catch (e) {
       console.error("Delete interview error:", e);
       toast.error("Failed to delete interview");
@@ -326,8 +352,19 @@ export function AllInterviewsAdmin({
                         <Button variant="ghost" size="sm" onClick={() => handleDownload(interview)}>
                           <Download className="h-4 w-4 mr-2" />Download
                         </Button>
+                        {interview.audioId && interview.guideId && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-orange-600 hover:text-orange-700 hover:bg-orange-50" 
+                            onClick={() => handleDeleteAnalysisOnly(interview)}
+                            title="Delete analysis only (keeps audio file)"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />Delete Analysis
+                          </Button>
+                        )}
                         <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDeleteInterview(interview)}>
-                          <Trash2 className="h-4 w-4 mr-2" />Delete
+                          <Trash2 className="h-4 w-4 mr-2" />Delete All
                         </Button>
                       </div>
                     </TableCell>

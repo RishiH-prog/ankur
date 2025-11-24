@@ -179,6 +179,24 @@ export function AnalysisVersionControl({ audioId, questionnaireId }: AnalysisVer
                           : "N/A"}
                       </div>
                     </div>
+                    {versionDetails.payload?.result?.prompts && versionDetails.payload.result.prompts.length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="font-semibold">Prompts ({versionDetails.payload.result.prompts.length}):</h4>
+                        <div className="max-h-[300px] overflow-y-auto space-y-2">
+                          {versionDetails.payload.result.prompts.map((p: any, idx: number) => (
+                            <div key={idx} className="border rounded p-3 text-sm bg-muted">
+                              <div className="font-medium mb-2">Prompt {p.index + 1}: {p.promptText}</div>
+                              {p.response && (
+                                <div className="mt-2">
+                                  <span className="font-medium">Response:</span>
+                                  <p className="mt-1 text-sm whitespace-pre-wrap">{p.response}</p>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {versionDetails.payload?.result?.questions && (
                       <div className="space-y-2">
                         <h4 className="font-semibold">Questions ({versionDetails.payload.result.questions.length}):</h4>

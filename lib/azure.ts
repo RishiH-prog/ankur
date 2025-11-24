@@ -390,6 +390,8 @@ export async function listQuestionnaires(
  */
 export interface GetQuestionnaireResponse extends QuestionnaireRecord {
   text: string;
+  questions?: string[];
+  prompts?: string[];
 }
 
 export async function getQuestionnaire(
@@ -462,12 +464,20 @@ export async function getQuestionnaire(
         }
       }
 
+      // Check if data contains questions/prompts structure
+      const questions = Array.isArray(data?.questions) ? data.questions : 
+                       (Array.isArray(data?.record?.questions) ? data.record.questions : undefined);
+      const prompts = Array.isArray(data?.prompts) ? data.prompts : 
+                     (Array.isArray(data?.record?.prompts) ? data.record.prompts : undefined);
+
       return {
         questionnaireId: data?.record?.questionnaireId || data?.questionnaireId || questionnaireId,
         originalFilename: data?.record?.originalFilename || data?.originalFilename || "",
         uploadedAt: data?.record?.uploadedAt || data?.uploadedAt || "",
         meta: data?.record?.meta || data?.meta || undefined,
         text: text || "",
+        questions,
+        prompts,
       };
     }
 
@@ -798,6 +808,18 @@ export async function createManualAnalysis(audioId: string, questionnaireId: str
   }
 }
 
+/**
+ * Deletes an analysis (or analysis versions) for a specific audio file and questionnaire.
+ * IMPORTANT: This function should ONLY delete the analysis data, NOT the audio file itself.
+ * The audio file should remain intact after deleting analyses.
+ * 
+ * @param audioId The audio ID
+ * @param questionnaireId The questionnaire/guide ID
+ * @param opts Options for deletion:
+ *   - version: Delete a specific version number
+ *   - allVersions: Delete all versions of the analysis
+ * @returns The deletion result from the API
+ */
 export async function deleteAnalysis(audioId: string, questionnaireId: string, opts?: { version?: number; allVersions?: boolean }): Promise<any> {
   if (!BASE_URL) {
     throw new Error("Azure base URL is not configured. Please set NEXT_PUBLIC_AZURE_BASE_URL in your .env.local file.");

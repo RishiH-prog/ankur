@@ -51,6 +51,7 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
   const { updateInterview } = useInterviewsStore();
   const { guides } = useGuidesStore();
   const [answers, setAnswers] = useState<AnswerBlock[]>([]);
+  const [prompts, setPrompts] = useState<Array<{ index: number; promptText: string; response: string }>>([]);
   const [hindiTranscript, setHindiTranscript] = useState<string>("");
   const [englishTranscript, setEnglishTranscript] = useState<string>("");
   const [versions, setVersions] = useState<Array<{ version: number; model: string; lastModified: string }>>([]);
@@ -145,8 +146,22 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
           versionToLoad ? { version: versionToLoad } : { latest: true }
         );
         const model: string | undefined = analysis?.model || analysis?.payload?.model;
-        const resultQs: Array<any> = analysis?.payload?.result?.questions || analysis?.result?.questions || [];
+        const result = analysis?.payload?.result || analysis?.result || {};
+        const resultQs: Array<any> = result.questions || [];
+        const resultPrompts: Array<any> = result.prompts || [];
         const guide = guides.find((g) => g.id === interview.guideId);
+        
+        // Set prompts
+        if (Array.isArray(resultPrompts) && resultPrompts.length > 0) {
+          setPrompts(resultPrompts.map((p: any) => ({
+            index: p.index ?? 0,
+            promptText: p.promptText || "",
+            response: p.response || "",
+          })));
+        } else {
+          setPrompts([]);
+        }
+        
         if (guide && Array.isArray(resultQs) && resultQs.length > 0) {
           const mapped: AnswerBlock[] = guide.questions.map((qText, i) => {
             const found = resultQs.find((q: any) => q.index === i) || resultQs[i] || {};
@@ -342,6 +357,26 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
                   <Textarea readOnly value={englishTranscript} className="bg-muted min-h-[100px]" />
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Prompts Section - Show at top */}
+          {prompts.length > 0 && (
+            <div className="space-y-4 border-t pt-4">
+              <h3 className="font-semibold">Prompts & Responses</h3>
+              <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                {prompts.map((prompt, idx) => (
+                  <div key={idx} className="space-y-2 border rounded p-3">
+                    <Label className="text-sm font-medium">Prompt {prompt.index + 1}: {prompt.promptText}</Label>
+                    <Textarea
+                      readOnly
+                      value={prompt.response}
+                      className="bg-muted min-h-[80px] text-sm"
+                      placeholder="No response yet"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
