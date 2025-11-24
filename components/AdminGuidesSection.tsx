@@ -115,41 +115,417 @@ export function AdminGuidesSection() {
   };
 
   const parseQuestionnaireData = (data: any): { questions: string[]; prompts: string[] } => {
+    // Check if data.text contains the corrupted format where entire JSON was stored in questions array
+    // Format: {"questions":["{","\"questions\": [",...]}
+    if (data?.text && typeof data.text === "string") {
+      const textStr = data.text.trim();
+      // Check if it's a JSON object with a questions array that contains corrupted JSON structure
+      if (textStr.startsWith("{") && textStr.includes('"questions"')) {
+        try {
+          const parsed = JSON.parse(textStr);
+          if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+            // Check if first element looks like JSON structure
+            const firstItem = parsed.questions[0];
+            if (typeof firstItem === "string" && (firstItem.trim() === "{" || firstItem.includes('"questions"'))) {
+              // This is the corrupted format - the entire JSON file was split into lines
+              // Extract questions and prompts directly from the array using the extraction logic
+              const lines = parsed.questions.map((item: any) => String(item)).filter(Boolean);
+              
+              const questions: string[] = [];
+              const prompts: string[] = [];
+              
+              // Patterns that indicate JSON structure (not actual content)
+              const isOpeningBrace = (s: string) => /^\s*\{\s*$/.test(s);
+              const isClosingBrace = (s: string) => /^\s*\}\s*,?\s*$/.test(s);
+              const isQuestionsKey = (s: string) => /^\s*"questions"\s*:\s*\[\s*$/.test(s);
+              const isPromptsKey = (s: string) => /^\s*"prompts"\s*:\s*\[\s*$/.test(s);
+              const isClosingBracket = (s: string) => /^\s*\]\s*,?\s*$/.test(s);
+              const isJustBracket = (s: string) => /^\s*[\[\]]\s*$/.test(s);
+              
+              let inQuestions = false;
+              let inPrompts = false;
+              let arrayDepth = 0;
+              
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                
+                // Check for state changes first
+                if (isQuestionsKey(trimmed)) {
+                  inQuestions = true;
+                  inPrompts = false;
+                  arrayDepth = 1;
+                  continue;
+                }
+                
+                if (isPromptsKey(trimmed)) {
+                  inQuestions = false;
+                  inPrompts = true;
+                  arrayDepth = 1;
+                  continue;
+                }
+                
+                if (isClosingBracket(trimmed) || isJustBracket(trimmed)) {
+                  if (arrayDepth === 1) {
+                    inQuestions = false;
+                    inPrompts = false;
+                  }
+                  if (trimmed === "]" || trimmed === "],") arrayDepth = Math.max(0, arrayDepth - 1);
+                  else if (trimmed === "[") arrayDepth++;
+                  continue;
+                }
+                
+                if (isOpeningBrace(trimmed) || isClosingBrace(trimmed)) {
+                  continue;
+                }
+                
+                // Extract content from quoted strings
+                const stringMatch = trimmed.match(/^"(.+?)"\s*,?\s*$/);
+                if (stringMatch) {
+                  const content = stringMatch[1];
+                  const isStructureElement = 
+                    content === "questions" || 
+                    content === "prompts" ||
+                    content.trim() === "";
+                  
+                  if (isStructureElement) {
+                    continue;
+                  }
+                  
+                  // Unescape the string content
+                  let unescapedContent = content
+                    .replace(/\\"/g, '"')
+                    .replace(/\\n/g, '\n')
+                    .replace(/\\t/g, '\t')
+                    .replace(/\\\\/g, '\\');
+                  
+                  if (inPrompts) {
+                    prompts.push(unescapedContent);
+                  } else if (inQuestions) {
+                    questions.push(unescapedContent);
+                  }
+                }
+              }
+              
+              if (questions.length > 0 || prompts.length > 0) {
+                return { questions, prompts };
+              }
+            }
+          }
+        } catch {
+          // Not valid JSON, continue to other parsing strategies
+        }
+      }
+    }
+    
     // First check if API returned questions/prompts directly
     if (Array.isArray(data?.questions) || Array.isArray(data?.prompts)) {
+      const questions = Array.isArray(data.questions) ? data.questions : [];
+      const prompts = Array.isArray(data.prompts) ? data.prompts : [];
+      
+      // Filter out any JSON structure elements
+      const filterStructureElements = (items: string[]): string[] => {
+        return items.filter(item => {
+          if (typeof item !== "string") return false;
+          const trimmed = item.trim();
+          const isStructure = 
+            trimmed === "{" ||
+            trimmed === "}" ||
+            trimmed === "[" ||
+            trimmed === "]" ||
+            trimmed === "]," ||
+            trimmed === "}," ||
+            trimmed === '"questions": [' ||
+            trimmed === '"prompts": [' ||
+            trimmed.startsWith('"questions":') ||
+            trimmed.startsWith('"prompts":') ||
+            /^\s*["']?questions["']?\s*[:=]\s*\[?\s*$/.test(trimmed) ||
+            /^\s*["']?prompts["']?\s*[:=]\s*\[?\s*$/.test(trimmed) ||
+            /^\s*[\[\]{}]\s*,?\s*$/.test(trimmed) ||
+            /^\s*[\[\]{}]\s*$/.test(trimmed);
+          return !isStructure;
+        });
+      };
+      
       return {
-        questions: Array.isArray(data.questions) ? data.questions : [],
-        prompts: Array.isArray(data.prompts) ? data.prompts : [],
+        questions: filterStructureElements(questions),
+        prompts: filterStructureElements(prompts),
       };
     }
 
     // Try to parse as JSON from text field
+    // Handle multiple possible text fields and formats
     let jsonData: any = null;
-    try {
-      if (typeof data === "string") {
-        jsonData = JSON.parse(data);
-      } else if (data?.text) {
-        // Try parsing text as JSON
+    const textFields = [
+      data?.text,
+      data?.questionsText,
+      typeof data === "string" ? data : null,
+    ].filter(Boolean);
+
+    for (const textField of textFields) {
+      if (!textField || typeof textField !== "string") continue;
+      
+      const trimmed = textField.trim();
+      
+      // Skip if it doesn't look like JSON
+      if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) continue;
+      
+      // Try multiple parsing strategies
+      const strategies = [
+        // Strategy 1: Parse as-is
+        () => JSON.parse(trimmed),
+        // Strategy 2: Remove double newlines
+        () => JSON.parse(trimmed.replace(/\n\n+/g, "\n")),
+        // Strategy 3: Remove empty lines but keep structure
+        () => {
+          let compacted = trimmed.replace(/\r\n/g, "\n");
+          compacted = compacted.split("\n").filter(line => line.trim()).join("\n");
+          return JSON.parse(compacted);
+        },
+        // Strategy 4: Try minifying by removing all newlines and extra spaces (but preserve spaces in strings)
+        () => {
+          // This is a last resort - try to reconstruct valid JSON
+          // Remove newlines, but be careful with strings
+          let minified = trimmed.replace(/\r\n/g, "\n");
+          // Remove comments if any
+          minified = minified.replace(/\/\/.*$/gm, '');
+          // Try to compact: remove newlines outside strings
+          let result = '';
+          let inString = false;
+          let escapeNext = false;
+          for (let i = 0; i < minified.length; i++) {
+            const char = minified[i];
+            if (escapeNext) {
+              result += char;
+              escapeNext = false;
+              continue;
+            }
+            if (char === '\\') {
+              escapeNext = true;
+              result += char;
+              continue;
+            }
+            if (char === '"') {
+              inString = !inString;
+              result += char;
+              continue;
+            }
+            if (!inString && (char === '\n' || char === '\r')) {
+              // Skip newlines outside strings
+              continue;
+            }
+            if (!inString && /\s/.test(char) && /\s/.test(result[result.length - 1] || '')) {
+              // Collapse whitespace outside strings
+              continue;
+            }
+            result += char;
+          }
+          return JSON.parse(result);
+        }
+      ];
+      
+      for (const strategy of strategies) {
         try {
-          jsonData = JSON.parse(data.text);
-        } catch {
-          // Not JSON, treat as plain text
+          jsonData = strategy();
+          if (jsonData && typeof jsonData === "object" && (jsonData.questions || jsonData.prompts)) {
+            break;
+          }
+        } catch (e) {
+          // Continue to next strategy
+          continue;
         }
       }
-    } catch {
-      // Not JSON, will parse as text
+      
+      if (jsonData && (jsonData.questions || jsonData.prompts)) {
+        break;
+      }
     }
 
+    // If we successfully parsed JSON with questions/prompts, return it
     if (jsonData && (jsonData.questions || jsonData.prompts)) {
+      // Filter out any JSON structure elements that might have been parsed incorrectly
+      const filterStructureElements = (items: string[]): string[] => {
+        return items.filter(item => {
+          if (typeof item !== "string") return false;
+          const trimmed = item.trim();
+          
+          // Reject clear JSON structure elements - be very aggressive
+          const isStructure = 
+            trimmed === "{" ||
+            trimmed === "}" ||
+            trimmed === "[" ||
+            trimmed === "]" ||
+            trimmed === "]," ||
+            trimmed === "}," ||
+            trimmed === '"questions": [' ||
+            trimmed === '"prompts": [' ||
+            trimmed.startsWith('"questions":') ||
+            trimmed.startsWith('"prompts":') ||
+            trimmed.startsWith('"questions"') ||
+            trimmed.startsWith('"prompts"') ||
+            /^\s*["']?questions["']?\s*[:=]\s*\[?\s*$/.test(trimmed) ||
+            /^\s*["']?prompts["']?\s*[:=]\s*\[?\s*$/.test(trimmed) ||
+            /^\s*[\[\]{}]\s*,?\s*$/.test(trimmed) ||
+            /^\s*[\[\]{}]\s*$/.test(trimmed);
+          
+          return !isStructure;
+        });
+      };
+      
       return {
-        questions: Array.isArray(jsonData.questions) ? jsonData.questions : [],
-        prompts: Array.isArray(jsonData.prompts) ? jsonData.prompts : [],
+        questions: Array.isArray(jsonData.questions) ? filterStructureElements(jsonData.questions) : [],
+        prompts: Array.isArray(jsonData.prompts) ? filterStructureElements(jsonData.prompts) : [],
       };
     }
 
     // Fallback: parse as plain text (legacy format)
-    const text = data?.text || data || "";
-    const lines = text.split("\n");
+    // Filter out JSON structure elements
+    const text = data?.text || data?.questionsText || data || "";
+    const textStr = typeof text === "string" ? text : String(text);
+    
+    // If it looks like JSON but we couldn't parse it, try to extract questions/prompts by filtering
+    if (textStr.trim().startsWith("{")) {
+      const lines = textStr.split("\n");
+      const questions: string[] = [];
+      const prompts: string[] = [];
+      
+      // Patterns that indicate JSON structure (not actual content)
+      const isOpeningBrace = (s: string) => /^\s*\{\s*$/.test(s);
+      const isClosingBrace = (s: string) => /^\s*\}\s*,?\s*$/.test(s);
+      const isQuestionsKey = (s: string) => /^\s*"questions"\s*:\s*\[\s*$/.test(s);
+      const isPromptsKey = (s: string) => /^\s*"prompts"\s*:\s*\[\s*$/.test(s);
+      const isClosingBracket = (s: string) => /^\s*\]\s*,?\s*$/.test(s);
+      const isJustBracket = (s: string) => /^\s*[\[\]]\s*$/.test(s);
+      
+      let inQuestions = false;
+      let inPrompts = false;
+      let arrayDepth = 0; // Track nested array depth
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        
+        // Check for state changes first
+        if (isQuestionsKey(trimmed)) {
+          inQuestions = true;
+          inPrompts = false;
+          arrayDepth = 1;
+          continue;
+        }
+        
+        if (isPromptsKey(trimmed)) {
+          inQuestions = false;
+          inPrompts = true;
+          arrayDepth = 1;
+          continue;
+        }
+        
+        if (isClosingBracket(trimmed)) {
+          if (arrayDepth === 1) {
+            // Closing the questions or prompts array
+            inQuestions = false;
+            inPrompts = false;
+          }
+          arrayDepth = Math.max(0, arrayDepth - 1);
+          continue;
+        }
+        
+        if (isJustBracket(trimmed)) {
+          // Opening bracket
+          if (trimmed === "[") arrayDepth++;
+          else if (trimmed === "]") arrayDepth = Math.max(0, arrayDepth - 1);
+          continue;
+        }
+        
+        if (isOpeningBrace(trimmed)) {
+          continue; // Skip opening brace
+        }
+        
+        if (isClosingBrace(trimmed)) {
+          // End of JSON object
+          inQuestions = false;
+          inPrompts = false;
+          continue;
+        }
+        
+        // Try to extract content from quoted strings (actual questions/prompts)
+        // Match strings that might span multiple lines or be on a single line
+        const stringMatch = trimmed.match(/^"(.+?)"\s*,?\s*$/);
+        if (stringMatch) {
+          // Explicitly reject lines that are JSON structure elements
+          const content = stringMatch[1];
+          const isStructureElement = 
+            content === "questions" || 
+            content === "prompts" ||
+            content.trim() === "" ||
+            content === "{" ||
+            content === "}" ||
+            content === "[" ||
+            content === "]";
+          
+          if (isStructureElement) {
+            continue; // Skip this line
+          }
+          
+          // Unescape the string content
+          let unescapedContent = content
+            .replace(/\\"/g, '"')
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '\t')
+            .replace(/\\\\/g, '\\');
+          
+          // Only add if we're actually in a questions or prompts array
+          if (inPrompts) {
+            prompts.push(unescapedContent);
+          } else if (inQuestions) {
+            questions.push(unescapedContent);
+          }
+        }
+      }
+      
+      // Final safety filter to remove any structure elements that slipped through
+      const filterStructureElements = (items: string[]): string[] => {
+        return items.filter(item => {
+          if (typeof item !== "string") return false;
+          const trimmed = item.trim();
+          
+          // Reject clear JSON structure elements - be very aggressive
+          const isStructure = 
+            trimmed === "{" ||
+            trimmed === "}" ||
+            trimmed === "[" ||
+            trimmed === "]" ||
+            trimmed === "]," ||
+            trimmed === "}," ||
+            trimmed === '"questions": [' ||
+            trimmed === '"prompts": [' ||
+            trimmed.startsWith('"questions":') ||
+            trimmed.startsWith('"prompts":') ||
+            trimmed.startsWith('"questions"') ||
+            trimmed.startsWith('"prompts"') ||
+            /^\s*["']?questions["']?\s*[:=]\s*\[?\s*$/.test(trimmed) ||
+            /^\s*["']?prompts["']?\s*[:=]\s*\[?\s*$/.test(trimmed) ||
+            /^\s*[\[\]{}]\s*,?\s*$/.test(trimmed) ||
+            /^\s*[\[\]{}]\s*$/.test(trimmed);
+          
+          return !isStructure;
+        });
+      };
+      
+      if (questions.length > 0 || prompts.length > 0) {
+        return { 
+          questions: filterStructureElements(questions), 
+          prompts: filterStructureElements(prompts) 
+        };
+      }
+      
+      // If we couldn't extract anything, return empty to avoid corruption
+      console.warn("Text appears to be JSON but failed to parse, returning empty arrays to avoid corruption");
+      return { questions: [], prompts: [] };
+    }
+
+    // Plain text format (legacy)
+    const lines = textStr.split("\n");
     const questions: string[] = [];
     for (const line of lines) {
       const trimmed = line.trim();
@@ -379,7 +755,9 @@ export function AdminGuidesSection() {
     try {
       console.debug("Viewing questionnaire:", questionnaireId);
       const data = await getQuestionnaire(questionnaireId);
+      console.debug("Raw questionnaire data:", data);
       const parsed = parseQuestionnaireData(data);
+      console.debug("Parsed questionnaire data:", parsed);
       setSelectedQuestionnaireData({
         questions: parsed.questions,
         prompts: parsed.prompts,

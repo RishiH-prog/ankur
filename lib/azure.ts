@@ -423,18 +423,39 @@ export async function getQuestionnaire(
       // Prefer explicit questionsText field per backend response
       let text: string = "";
       if (typeof data?.questionsText === "string") {
-        // Normalize CRLF -> LF and add blank lines between questions for readability
-        const normalized = data.questionsText.replace(/\r\n/g, "\n").trim();
-        text = normalized.split("\n").join("\n\n");
+        const rawText = data.questionsText.trim();
+        // Check if it looks like JSON (starts with { or [)
+        if (rawText.startsWith("{") || rawText.startsWith("[")) {
+          // It's JSON, only normalize CRLF -> LF without adding extra newlines
+          text = rawText.replace(/\r\n/g, "\n");
+        } else {
+          // Normalize CRLF -> LF and add blank lines between questions for readability (plain text format)
+          const normalized = rawText.replace(/\r\n/g, "\n");
+          text = normalized.split("\n").join("\n\n");
+        }
       } else {
         // Attempt to resolve text from multiple likely fields
-        text =
+        const rawTextValue =
           data?.text ??
           data?.content ??
           data?.fileText ??
           data?.raw ??
           data?.body ??
           "";
+        
+        // Check if it looks like JSON before processing
+        if (typeof rawTextValue === "string") {
+          const trimmed = rawTextValue.trim();
+          if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            // It's JSON, preserve as-is (only normalize CRLF -> LF)
+            text = trimmed.replace(/\r\n/g, "\n");
+          } else {
+            // Plain text, use as-is for now (will be normalized later if needed)
+            text = trimmed;
+          }
+        } else {
+          text = rawTextValue || "";
+        }
 
         // If API returns a URL to the text blob, follow it
         const possibleUrl: string | undefined =
@@ -444,8 +465,16 @@ export async function getQuestionnaire(
             const blobResp = await fetch(possibleUrl);
             if (blobResp.ok) {
               const fetched = await blobResp.text();
-              const normalized = fetched.replace(/\r\n/g, "\n").trim();
-              text = normalized.split("\n").join("\n\n");
+              const trimmed = fetched.trim();
+              // Check if it looks like JSON
+              if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                // It's JSON, only normalize CRLF -> LF
+                text = trimmed.replace(/\r\n/g, "\n");
+              } else {
+                // Plain text, normalize with double newlines for readability
+                const normalized = trimmed.replace(/\r\n/g, "\n");
+                text = normalized.split("\n").join("\n\n");
+              }
             } else {
               console.warn("getQuestionnaire blob fetch failed:", blobResp.status, blobResp.statusText);
             }
