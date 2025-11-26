@@ -1,6 +1,21 @@
 import { AzureUploadMeta, AzureRecord, TranscriptResponse } from "./types";
 
-const BASE_URL = process.env.NEXT_PUBLIC_AZURE_BASE_URL || "";
+// Normalize BASE_URL to ensure it has https:// protocol and no trailing slash
+function normalizeBaseUrl(url: string | undefined): string {
+  if (!url) return "";
+  
+  // Remove trailing slash if present
+  let normalized = url.trim().replace(/\/+$/, "");
+  
+  // Add https:// protocol if missing
+  if (normalized && !normalized.match(/^https?:\/\//i)) {
+    normalized = `https://${normalized}`;
+  }
+  
+  return normalized;
+}
+
+const BASE_URL = normalizeBaseUrl(process.env.NEXT_PUBLIC_AZURE_BASE_URL);
 
 if (!BASE_URL) {
   console.warn(

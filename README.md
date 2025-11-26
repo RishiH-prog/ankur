@@ -34,7 +34,7 @@ A Next.js application for managing farmer interviews with AI-powered transcripti
    
    Update `.env.local` with your Azure Function App URL:
    ```env
-   NEXT_PUBLIC_AZURE_BASE_URL=https://interview-processor-func.azurewebsites.net
+   NEXT_PUBLIC_AZURE_BASE_URL=https://interview-fge7budmd3h4bkeq.centralindia-01.azurewebsites.net
    ```
 
 3. **Run the development server:**
