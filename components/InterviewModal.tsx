@@ -164,10 +164,26 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
         
         if (guide && Array.isArray(resultQs) && resultQs.length > 0) {
           // Get prompt texts to filter them out from questions
+          // Store both full text and first few words for better matching
           const promptTexts = new Set(
             resultPrompts
               .filter((p: any) => p && p.promptText)
               .map((p: any) => p.promptText.trim().toLowerCase())
+          );
+          
+          // Also create a set of prompt text snippets (first 50 chars) for partial matching
+          const promptTextSnippets = new Set(
+            resultPrompts
+              .filter((p: any) => p && p.promptText)
+              .map((p: any) => {
+                const fullText = p.promptText.trim().toLowerCase();
+                // Return first 50 characters and first few words
+                return {
+                  snippet: fullText.substring(0, 50),
+                  firstWords: fullText.split(/\s+/).slice(0, 5).join(' '),
+                  full: fullText,
+                };
+              })
           );
           
           // Get prompt indices to exclude them from questions
@@ -323,43 +339,122 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
               return true;
             });
           
-          const mapped: AnswerBlock[] = filteredQuestionsWithIndices.map(({ qText, originalIndex }, i) => {
-            // First try to find by original index match (to match with analysis results)
-            let found = validQuestions.find((q: any) => q.index === originalIndex);
-            
-            // If not found by index, try by array position (but only if it's a valid object)
-            // Make sure the found item is not a prompt
-            if (!found && validQuestions[i]) {
-              const candidate = validQuestions[i];
-              // Double-check it's not a prompt before using it
-              if (!candidate.promptText && !(candidate.response && !candidate.answerSummary && !candidate.questionText)) {
-                found = candidate;
+          const mapped: AnswerBlock[] = filteredQuestionsWithIndices
+            .map(({ qText, originalIndex }, i) => {
+              // First try to find by original index match (to match with analysis results)
+              let found = validQuestions.find((q: any) => q.index === originalIndex);
+              
+              // If not found by index, try by array position (but only if it's a valid object)
+              // Make sure the found item is not a prompt
+              if (!found && validQuestions[i]) {
+                const candidate = validQuestions[i];
+                // Double-check it's not a prompt before using it
+                if (!candidate.promptText && !(candidate.response && !candidate.answerSummary && !candidate.questionText)) {
+                  found = candidate;
+                }
               }
-            }
-            
-            // If still not found, use empty object
-            if (!found) {
-              found = {};
-            }
-            
-            // Final safety check: if found item looks like a prompt, ignore it
-            if (found && (found.promptText || (found.response && !found.answerSummary && !found.questionText))) {
-              found = {};
-            }
-            
-            // Extract all verbatim quotes with notes
-            const allQuotes = Array.isArray(found?.verbatimQuotes) 
-              ? found.verbatimQuotes.map((vq: any) => ({
-                  quote: vq.quote || "",
-                  note: vq.note || undefined,
-                }))
-              : undefined;
-            return {
-              question: qText,
-              answer: found?.answerSummary || "",
-              quotes: allQuotes && allQuotes.length > 0 ? allQuotes : undefined,
-            } as AnswerBlock;
-          });
+              
+              // If still not found, use empty object
+              if (!found) {
+                found = {};
+              }
+              
+              // Final safety check: if found item looks like a prompt, ignore it
+              if (found && (found.promptText || (found.response && !found.answerSummary && !found.questionText))) {
+                found = {};
+              }
+              
+              // Extract all verbatim quotes with notes
+              const allQuotes = Array.isArray(found?.verbatimQuotes) 
+                ? found.verbatimQuotes.map((vq: any) => ({
+                    quote: vq.quote || "",
+                    note: vq.note || undefined,
+                  }))
+                : undefined;
+              return {
+                question: qText,
+                answer: found?.answerSummary || "",
+                quotes: allQuotes && allQuotes.length > 0 ? allQuotes : undefined,
+              } as AnswerBlock;
+            })
+            .filter((answerBlock) => {
+              // Final filter: exclude any question that matches a prompt text
+              const normalizedQuestion = answerBlock.question.trim().toLowerCase();
+              const hasAnswer = (answerBlock.answer || "").trim().length > 0;
+              
+              // Check if this question text matches any prompt
+              if (allPromptTexts.has(normalizedQuestion)) return false;
+              
+              // Check for partial matches - if question text contains or is contained by a prompt
+              for (const promptText of allPromptTexts) {
+                if (normalizedQuestion === promptText) return false;
+                
+                // If question text matches prompt text exactly or is very similar, exclude it
+                if (normalizedQuestion === promptText) return false;
+                
+                // Check if question starts with prompt text or vice versa (for partial matches)
+                if (normalizedQuestion.startsWith(promptText) || promptText.startsWith(normalizedQuestion)) {
+                  // If one is a substantial portion of the other, exclude it
+                  const minLength = Math.min(normalizedQuestion.length, promptText.length);
+                  const maxLength = Math.max(normalizedQuestion.length, promptText.length);
+                  if (minLength / maxLength >= 0.5) {
+                    return false;
+                  }
+                }
+                
+                // Check if question contains prompt text (for cases where prompt is embedded)
+                if (normalizedQuestion.includes(promptText) || promptText.includes(normalizedQuestion)) {
+                  // If the shorter one is at least 30% of longer, likely the same (more aggressive)
+                  const longer = normalizedQuestion.length > promptText.length ? normalizedQuestion : promptText;
+                  const shorter = normalizedQuestion.length > promptText.length ? promptText : normalizedQuestion;
+                  if (shorter.length / longer.length >= 0.3) {
+                    return false;
+                  }
+                }
+                
+                // Check if question text starts with first words of a prompt
+                const promptFirstWords = promptText.split(/\s+/).slice(0, 5).join(' ');
+                if (normalizedQuestion.startsWith(promptFirstWords) || promptFirstWords.startsWith(normalizedQuestion.split(/\s+/)[0])) {
+                  return false;
+                }
+              }
+              
+              // Check against prompt snippets for better matching
+              for (const promptSnippet of promptTextSnippets) {
+                if (normalizedQuestion.includes(promptSnippet.snippet) || normalizedQuestion.startsWith(promptSnippet.firstWords)) {
+                  return false;
+                }
+                if (promptSnippet.full.includes(normalizedQuestion) && normalizedQuestion.length > 20) {
+                  return false;
+                }
+              }
+              
+              // Check for common prompt patterns in the question text itself
+              const promptPatterns = [
+                /interview analysis prompt/i,
+                /evaluate.*interview/i,
+                /interview guide criteria/i,
+                /^\s*["']?interview analysis prompt["']?\s*$/i, // Exact match for quoted prompt text
+              ];
+              
+              for (const pattern of promptPatterns) {
+                if (pattern.test(answerBlock.question)) {
+                  return false;
+                }
+              }
+              
+              // Extra safety: if question has no answer AND question text looks like a prompt, exclude it
+              if (!hasAnswer) {
+                // Check if question text looks like it's just a prompt text
+                for (const promptText of allPromptTexts) {
+                  if (normalizedQuestion.includes(promptText.substring(0, 30)) || promptText.includes(normalizedQuestion.substring(0, 30))) {
+                    return false;
+                  }
+                }
+              }
+              
+              return true;
+            });
           setAnswers(mapped);
           // Use model name as status (e.g., "gpt-5.1", "gpt-5.1-human-edit")
           const statusFromModel: Interview["status"] = model || "Draft";
