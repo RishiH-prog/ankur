@@ -122,8 +122,49 @@ export function AnalyzeSection() {
 
       let answers: AnswerBlock[] = [];
       if (Array.isArray(questions) && questions.length > 0) {
-        answers = selectedGuide.questions.map((qText, i) => {
-          const found = questions.find((q: any) => q.index === i) || questions[i] || {};
+        // Filter out invalid entries (strings, null, undefined) and ensure we have objects
+        const validQuestions = questions.filter((q: any) => 
+          q && typeof q === "object" && !Array.isArray(q) && (q.answerSummary !== undefined || q.index !== undefined)
+        );
+        
+        // Filter out invalid question text from guide (like "{", "questions": [", etc.)
+        const isValidQuestionText = (text: string): boolean => {
+          if (!text || typeof text !== "string") return false;
+          const trimmed = text.trim();
+          // Reject JSON structure elements
+          return !(
+            trimmed === "{" ||
+            trimmed === "}" ||
+            trimmed === "[" ||
+            trimmed === "]" ||
+            trimmed === "]," ||
+            trimmed === "}," ||
+            trimmed === '"questions": [' ||
+            trimmed === '"prompts": [' ||
+            trimmed.startsWith('"questions":') ||
+            trimmed.startsWith('"prompts":') ||
+            /^\s*[\[\]{}]\s*,?\s*$/.test(trimmed) ||
+            /^\s*[\[\]{}]\s*$/.test(trimmed)
+          );
+        };
+        
+        // Filter guide questions to only valid ones
+        const validGuideQuestions = selectedGuide.questions.filter(isValidQuestionText);
+        
+        answers = validGuideQuestions.map((qText, i) => {
+          // First try to find by index match
+          let found = validQuestions.find((q: any) => q.index === i);
+          
+          // If not found by index, try by array position (but only if it's a valid object)
+          if (!found && validQuestions[i]) {
+            found = validQuestions[i];
+          }
+          
+          // If still not found, use empty object
+          if (!found) {
+            found = {};
+          }
+          
           // Extract all verbatim quotes with notes
           const allQuotes = Array.isArray(found?.verbatimQuotes) 
             ? found.verbatimQuotes.map((vq: any) => ({

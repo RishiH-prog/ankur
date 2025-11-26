@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { Loader2, GitBranch } from "lucide-react";
 import { useInterviewsStore } from "@/store/interviews";
 import { useGuidesStore } from "@/store/guides";
-import { getAnalysis, getTranscript, getTranslation, createManualAnalysis, listAnalysis } from "@/lib/azure";
+import { getAnalysis, getTranscript, getTranslation, createManualAnalysis, listAnalysis, getQuestionnaire } from "@/lib/azure";
 import type { Interview, AnswerBlock } from "@/lib/types";
 import { formatDate } from "@/lib/format";
 
@@ -163,8 +163,190 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
         }
         
         if (guide && Array.isArray(resultQs) && resultQs.length > 0) {
-          const mapped: AnswerBlock[] = guide.questions.map((qText, i) => {
-            const found = resultQs.find((q: any) => q.index === i) || resultQs[i] || {};
+          // Get prompt texts to filter them out from questions
+          const promptTexts = new Set(
+            resultPrompts
+              .filter((p: any) => p && p.promptText)
+              .map((p: any) => p.promptText.trim().toLowerCase())
+          );
+          
+          // Get prompt indices to exclude them from questions
+          const promptIndices = new Set(
+            resultPrompts
+              .filter((p: any) => p && p.index !== undefined && p.index !== null)
+              .map((p: any) => p.index)
+          );
+          
+          // Filter out invalid entries (strings, null, undefined) and ensure we have objects
+          // Also filter out items that are actually prompts (have promptText field or match prompt texts)
+          const validQuestions = resultQs.filter((q: any) => {
+            if (!q || typeof q !== "object" || Array.isArray(q)) return false;
+            
+            // Skip items that have promptText field (they're prompts, not questions)
+            if (q.promptText) return false;
+            
+            // Skip items where questionText matches a prompt text
+            if (q.questionText && promptTexts.has(q.questionText.trim().toLowerCase())) return false;
+            
+            // Skip items that have a response field but no answerSummary (these are likely prompts)
+            if (q.response && !q.answerSummary && !q.questionText) return false;
+            
+            // Skip items that are prompts based on their index if they match prompt indices
+            // Only if the item doesn't have valid question structure
+            if (q.index !== undefined && promptIndices.has(q.index)) {
+              // Double-check: if it has a response but no answerSummary, it's a prompt
+              if (q.response && !q.answerSummary) return false;
+            }
+            
+            // Only include items that have answerSummary or index (valid questions)
+            return q.answerSummary !== undefined || (q.index !== undefined && q.questionText);
+          });
+          
+          // Filter out invalid question text from guide (like "{", "questions": [", etc.)
+          const isValidQuestionText = (text: string): boolean => {
+            if (!text || typeof text !== "string") return false;
+            const trimmed = text.trim();
+            // Reject JSON structure elements
+            return !(
+              trimmed === "{" ||
+              trimmed === "}" ||
+              trimmed === "[" ||
+              trimmed === "]" ||
+              trimmed === "]," ||
+              trimmed === "}," ||
+              trimmed === '"questions": [' ||
+              trimmed === '"prompts": [' ||
+              trimmed.startsWith('"questions":') ||
+              trimmed.startsWith('"prompts":') ||
+              /^\s*[\[\]{}]\s*,?\s*$/.test(trimmed) ||
+              /^\s*[\[\]{}]\s*$/.test(trimmed)
+            );
+          };
+          
+          // Get guide prompts to exclude them from questions
+          const guidePromptTexts = new Set(
+            (guide.prompts || [])
+              .filter((p: string) => p && typeof p === "string")
+              .map((p: string) => p.trim().toLowerCase())
+          );
+          
+          // Combine both prompt text sets for filtering (from analysis result and guide)
+          const allPromptTexts = new Set([...promptTexts, ...guidePromptTexts]);
+          
+          // Filter guide questions to only valid ones
+          // Also filter out any prompts that might be in the questions array
+          const validGuideQuestions = guide.questions.filter((qText: string) => {
+            if (!isValidQuestionText(qText)) return false;
+            
+            const normalizedQText = qText.trim().toLowerCase();
+            
+            // Direct match against all known prompts (from analysis or guide)
+            if (allPromptTexts.has(normalizedQText)) return false;
+            
+            // Also check for substring matches (prompts might have slight variations)
+            // But only exclude if it's a close match
+            for (const promptText of allPromptTexts) {
+              // If the question text is the same as or very similar to a prompt, exclude it
+              if (normalizedQText === promptText) return false;
+              
+              // Check if one contains the other (for partial matches)
+              const longer = normalizedQText.length > promptText.length ? normalizedQText : promptText;
+              const shorter = normalizedQText.length > promptText.length ? promptText : normalizedQText;
+              
+              // If the shorter one is at least 80% of the longer one and is contained in it, likely the same
+              if (shorter.length / longer.length >= 0.8 && longer.includes(shorter)) {
+                // Exclude if they're very similar (likely same content)
+                return false;
+              }
+            }
+            
+            return true;
+          });
+          
+          // If guide has no valid questions, try to fetch fresh from Azure
+          let questionsToUse = validGuideQuestions;
+          if (validGuideQuestions.length === 0 && interview.guideId) {
+            try {
+              const questionnaire = await getQuestionnaire(interview.guideId);
+              if (questionnaire?.questions && Array.isArray(questionnaire.questions)) {
+                // Also get prompts from questionnaire if available
+                const questionnairePrompts = new Set(
+                  (questionnaire.prompts || [])
+                    .filter((p: string) => p && typeof p === "string")
+                    .map((p: string) => p.trim().toLowerCase())
+                );
+                const allQuestionnairePrompts = new Set([...allPromptTexts, ...questionnairePrompts]);
+                
+                questionsToUse = questionnaire.questions.filter((qText: string) => {
+                  if (!isValidQuestionText(qText)) return false;
+                  // Also filter out prompts from fetched questions
+                  const normalizedQText = qText.trim().toLowerCase();
+                  if (allQuestionnairePrompts.has(normalizedQText)) return false;
+                  
+                  // Check for similar prompts
+                  for (const promptText of allQuestionnairePrompts) {
+                    if (normalizedQText.includes(promptText) || promptText.includes(normalizedQText)) {
+                      if (Math.abs(normalizedQText.length - promptText.length) < 10) {
+                        return false;
+                      }
+                    }
+                  }
+                  
+                  return true;
+                });
+              }
+            } catch (e) {
+              console.warn("Failed to fetch questionnaire for questions:", e);
+            }
+          }
+          
+          // Before mapping, filter out any prompts that might be in the questions list
+          // We'll keep track of original indices to match with analysis results
+          const filteredQuestionsWithIndices = questionsToUse
+            .map((qText, originalIndex) => ({ qText, originalIndex }))
+            .filter(({ qText }) => {
+              // Double-check: if this question text matches any prompt, exclude it completely
+              const normalizedQText = qText.trim().toLowerCase();
+              
+              // Check against all possible prompt sources
+              if (allPromptTexts.has(normalizedQText)) return false;
+              
+              // Also check for substring matches
+              for (const promptText of allPromptTexts) {
+                if (normalizedQText === promptText) return false;
+                const longer = normalizedQText.length > promptText.length ? normalizedQText : promptText;
+                const shorter = normalizedQText.length > promptText.length ? promptText : normalizedQText;
+                if (shorter.length / longer.length >= 0.8 && longer.includes(shorter)) {
+                  return false;
+                }
+              }
+              return true;
+            });
+          
+          const mapped: AnswerBlock[] = filteredQuestionsWithIndices.map(({ qText, originalIndex }, i) => {
+            // First try to find by original index match (to match with analysis results)
+            let found = validQuestions.find((q: any) => q.index === originalIndex);
+            
+            // If not found by index, try by array position (but only if it's a valid object)
+            // Make sure the found item is not a prompt
+            if (!found && validQuestions[i]) {
+              const candidate = validQuestions[i];
+              // Double-check it's not a prompt before using it
+              if (!candidate.promptText && !(candidate.response && !candidate.answerSummary && !candidate.questionText)) {
+                found = candidate;
+              }
+            }
+            
+            // If still not found, use empty object
+            if (!found) {
+              found = {};
+            }
+            
+            // Final safety check: if found item looks like a prompt, ignore it
+            if (found && (found.promptText || (found.response && !found.answerSummary && !found.questionText))) {
+              found = {};
+            }
+            
             // Extract all verbatim quotes with notes
             const allQuotes = Array.isArray(found?.verbatimQuotes) 
               ? found.verbatimQuotes.map((vq: any) => ({
@@ -199,13 +381,19 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
     setAnswers(updated);
   };
 
+  const handlePromptResponseChange = (index: number, value: string) => {
+    const updated = [...prompts];
+    updated[index] = { ...updated[index], response: value };
+    setPrompts(updated);
+  };
+
   const handleSave = async () => {
     try {
       if (!interview.audioId || !interview.guideId) {
         toast.error("Missing audio/guide identifiers");
         return;
       }
-      // Build result payload from current answers
+      // Build result payload from current answers and prompts
       const resultPayload = {
         model: "gpt-5.1-human-edit",
         result: {
@@ -219,6 +407,11 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
             verbatimQuotes: a.quotes && a.quotes.length > 0 
               ? a.quotes.map(q => ({ quote: q.quote, note: q.note }))
               : [],
+          })),
+          prompts: prompts.map((p) => ({
+            index: p.index,
+            promptText: p.promptText,
+            response: p.response || "",
           })),
         },
       };
@@ -364,14 +557,16 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
           {prompts.length > 0 && (
             <div className="space-y-4 border-t pt-4">
               <h3 className="font-semibold">Prompts & Responses</h3>
-              <div className="space-y-3 max-h-[300px] overflow-y-auto">
+              <div className="space-y-3">
                 {prompts.map((prompt, idx) => (
                   <div key={idx} className="space-y-2 border rounded p-3">
                     <Label className="text-sm font-medium">Prompt {prompt.index + 1}: {prompt.promptText}</Label>
                     <Textarea
-                      readOnly
                       value={prompt.response}
-                      className="bg-muted min-h-[80px] text-sm"
+                      onChange={(e) => handlePromptResponseChange(idx, e.target.value)}
+                      className="bg-background text-sm"
+                      rows={15}
+                      style={{ minHeight: '300px', height: 'auto' }}
                       placeholder="No response yet"
                     />
                   </div>
@@ -388,7 +583,7 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
                 <Label className="text-base font-medium">Question {index + 1}: {answerBlock.question}</Label>
                 <div className="space-y-2">
                   <Label htmlFor={`answer-${index}`}>Answer</Label>
-                  <Textarea id={`answer-${index}`} value={answerBlock.answer} onChange={(e) => handleAnswerChange(index, "answer", e.target.value)} className="min-h-[80px]" />
+                  <Textarea id={`answer-${index}`} value={answerBlock.answer} onChange={(e) => handleAnswerChange(index, "answer", e.target.value)} rows={10} className="min-h-[200px]" />
                 </div>
                 {answerBlock.quotes && answerBlock.quotes.length > 0 && (
                   <div className="space-y-2">
