@@ -27,8 +27,8 @@ import { downloadSingleInterview, downloadBulkInterviews } from "@/lib/download"
 import { toast } from "sonner";
 import { TOAST_MESSAGES } from "@/lib/toastMessages";
 import type { Interview } from "@/lib/types";
-import { Download, Eye, ArrowUpDown, Trash2, GitBranch } from "lucide-react";
-import { deleteRecord, deleteAnalysis } from "@/lib/azure";
+import { Download, Eye, ArrowUpDown, Trash2, GitBranch, FileText } from "lucide-react";
+import { deleteRecord, deleteAnalysis, getTranscript, getTranslation } from "@/lib/azure";
 
 type SortField = "guideName" | "interviewer" | "farmerName" | "date" | "village" | "status";
 type SortOrder = "asc" | "desc";
@@ -134,6 +134,74 @@ export function AllInterviewsAdmin({
     } catch (error) {
       console.error("Error downloading interview:", error);
       toast.error("Failed to download interview");
+    }
+  };
+
+  const handleDownloadRawTranscript = async (interview: Interview) => {
+    if (!interview.audioId) {
+      toast.error("No audio file available for this interview");
+      return;
+    }
+
+    try {
+      toast.info("Fetching transcripts...");
+      
+      // Fetch Hindi transcript
+      let hindiTranscript: string | undefined;
+      try {
+        const transcriptResp = await getTranscript(interview.audioId);
+        if (transcriptResp.status === "ready" && transcriptResp.data) {
+          hindiTranscript = transcriptResp.data;
+        }
+      } catch (error) {
+        console.error("Error fetching Hindi transcript:", error);
+      }
+
+      // Fetch English translation
+      let englishTranscript: string | undefined;
+      try {
+        const translationResp = await getTranslation(interview.audioId);
+        if (translationResp.status === "ready" && translationResp.data) {
+          englishTranscript = translationResp.data;
+        }
+      } catch (error) {
+        console.error("Error fetching English translation:", error);
+      }
+
+      if (!hindiTranscript && !englishTranscript) {
+        toast.error("Transcripts are not available yet");
+        return;
+      }
+
+      // Create content
+      let content = "";
+      if (hindiTranscript) {
+        content += "Hindi Transcript (हिंदी प्रतिलिपि)\n";
+        content += "=".repeat(80) + "\n\n";
+        content += hindiTranscript + "\n\n";
+      }
+      if (englishTranscript) {
+        content += "English Transcript\n";
+        content += "=".repeat(80) + "\n\n";
+        content += englishTranscript;
+      }
+
+      // Download file
+      const blob = new Blob([content], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeFarmerName = interview.farmerName.replace(/[^a-zA-Z0-9]/g, "_");
+      a.download = `transcripts_${safeFarmerName}_${interview.id}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      toast.success("Raw transcripts downloaded");
+    } catch (error) {
+      console.error("Error downloading raw transcripts:", error);
+      toast.error("Failed to download transcripts");
     }
   };
 
@@ -352,6 +420,11 @@ export function AllInterviewsAdmin({
                         <Button variant="ghost" size="sm" onClick={() => handleDownload(interview)}>
                           <Download className="h-4 w-4 mr-2" />Download
                         </Button>
+                        {interview.audioId && (
+                          <Button variant="ghost" size="sm" onClick={() => handleDownloadRawTranscript(interview)}>
+                            <FileText className="h-4 w-4 mr-2" />Download Raw Transcript
+                          </Button>
+                        )}
                         {interview.audioId && interview.guideId && (
                           <Button 
                             variant="ghost" 

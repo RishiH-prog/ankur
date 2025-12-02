@@ -343,39 +343,39 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
             .map(({ qText, originalIndex }, i) => {
               // First try to find by original index match (to match with analysis results)
               let found = validQuestions.find((q: any) => q.index === originalIndex);
-              
-              // If not found by index, try by array position (but only if it's a valid object)
+            
+            // If not found by index, try by array position (but only if it's a valid object)
               // Make sure the found item is not a prompt
-              if (!found && validQuestions[i]) {
+            if (!found && validQuestions[i]) {
                 const candidate = validQuestions[i];
                 // Double-check it's not a prompt before using it
                 if (!candidate.promptText && !(candidate.response && !candidate.answerSummary && !candidate.questionText)) {
                   found = candidate;
                 }
-              }
-              
-              // If still not found, use empty object
-              if (!found) {
-                found = {};
-              }
+            }
+            
+            // If still not found, use empty object
+            if (!found) {
+              found = {};
+            }
               
               // Final safety check: if found item looks like a prompt, ignore it
               if (found && (found.promptText || (found.response && !found.answerSummary && !found.questionText))) {
                 found = {};
               }
-              
-              // Extract all verbatim quotes with notes
-              const allQuotes = Array.isArray(found?.verbatimQuotes) 
-                ? found.verbatimQuotes.map((vq: any) => ({
-                    quote: vq.quote || "",
-                    note: vq.note || undefined,
-                  }))
-                : undefined;
-              return {
-                question: qText,
-                answer: found?.answerSummary || "",
-                quotes: allQuotes && allQuotes.length > 0 ? allQuotes : undefined,
-              } as AnswerBlock;
+            
+            // Extract all verbatim quotes with notes
+            const allQuotes = Array.isArray(found?.verbatimQuotes) 
+              ? found.verbatimQuotes.map((vq: any) => ({
+                  quote: vq.quote || "",
+                  note: vq.note || undefined,
+                }))
+              : undefined;
+            return {
+              question: qText,
+              answer: found?.answerSummary || "",
+              quotes: allQuotes && allQuotes.length > 0 ? allQuotes : undefined,
+            } as AnswerBlock;
             })
             .filter((answerBlock) => {
               // Final filter: exclude any question that matches a prompt text
@@ -454,7 +454,7 @@ export function InterviewModal({ interview, open, onOpenChange, isAdmin = false 
               }
               
               return true;
-            });
+          });
           setAnswers(mapped);
           // Use model name as status (e.g., "gpt-5.1", "gpt-5.1-human-edit")
           const statusFromModel: Interview["status"] = model || "Draft";

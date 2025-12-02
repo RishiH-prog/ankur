@@ -3,6 +3,33 @@ import { formatDate, formatTimestamp } from "./format";
 import { getAnalysis, getQuestionnaire } from "./azure";
 
 /**
+ * Fetches prompts from analysis if available
+ */
+async function fetchPrompts(interview: Interview): Promise<Array<{ index: number; promptText: string; response: string }>> {
+  if (!interview.audioId || !interview.guideId) {
+    return [];
+  }
+
+  try {
+    const analysis = await getAnalysis(interview.audioId, interview.guideId, { latest: true });
+    const result = analysis?.payload?.result || analysis?.result || {};
+    const resultPrompts: Array<any> = result.prompts || [];
+    
+    if (Array.isArray(resultPrompts) && resultPrompts.length > 0) {
+      return resultPrompts.map((p: any) => ({
+        index: p.index ?? 0,
+        promptText: p.promptText || "",
+        response: p.response || "",
+      }));
+    }
+  } catch (error) {
+    console.error("Error fetching prompts for download:", error);
+  }
+
+  return [];
+}
+
+/**
  * Fetches answers for an interview if they're missing
  */
 async function ensureInterviewAnswers(interview: Interview, guides: Array<{ id: string; questions: string[] }>): Promise<AnswerBlock[]> {
@@ -116,6 +143,8 @@ export async function downloadSingleInterview(
 ): Promise<void> {
   // Fetch answers if missing
   const answers = await ensureInterviewAnswers(interview, guides);
+  // Fetch prompts
+  const prompts = await fetchPrompts(interview);
 
   let content = "Interview Summary\n\n";
   content += `Interviewer: ${interview.interviewer}\n`;
@@ -123,6 +152,21 @@ export async function downloadSingleInterview(
   content += `Village: ${interview.village}\n`;
   content += `Farmer ID: ${interview.farmerName}\n`;
   content += `Guide: ${interview.guideName}\n\n`;
+
+  // Add prompts section
+  if (prompts && prompts.length > 0) {
+    content += "Prompts & Responses\n";
+    content += "=".repeat(80) + "\n\n";
+    prompts.forEach((prompt, index) => {
+      content += `Prompt ${prompt.index + 1}: ${prompt.promptText}\n`;
+      content += `Response: ${prompt.response || "(No response)"}\n\n`;
+    });
+    content += "\n";
+  }
+
+  // Add questions section
+  content += "Questions & Answers\n";
+  content += "=".repeat(80) + "\n\n";
 
   // Ensure answers array exists and iterate through it
   if (answers && Array.isArray(answers) && answers.length > 0) {
@@ -177,6 +221,7 @@ export async function downloadBulkInterviews(
   for (let index = 0; index < interviews.length; index++) {
     const interview = interviews[index];
     const answers = await ensureInterviewAnswers(interview, guides);
+    const prompts = await fetchPrompts(interview);
 
     content += `INTERVIEW ${index + 1} of ${interviews.length}\n`;
     content += "=".repeat(80) + "\n\n";
@@ -185,6 +230,21 @@ export async function downloadBulkInterviews(
     content += `Village: ${interview.village}\n`;
     content += `Farmer ID: ${interview.farmerName}\n`;
     content += `Guide: ${interview.guideName}\n\n`;
+
+    // Add prompts section
+    if (prompts && prompts.length > 0) {
+      content += "Prompts & Responses\n";
+      content += "-".repeat(80) + "\n\n";
+      prompts.forEach((prompt, pIndex) => {
+        content += `Prompt ${prompt.index + 1}: ${prompt.promptText}\n`;
+        content += `Response: ${prompt.response || "(No response)"}\n\n`;
+      });
+      content += "\n";
+    }
+
+    // Add questions section
+    content += "Questions & Answers\n";
+    content += "-".repeat(80) + "\n\n";
 
     // Ensure answers array exists and iterate through it
     if (answers && Array.isArray(answers) && answers.length > 0) {
